@@ -1,0 +1,129 @@
+#Library
+library(mice)
+library(VIM)
+library(knitr)
+library(ggplot2)
+
+#Data
+getwd()
+setwd("~/Desktop/ams-project 1/part A")
+PartA_IV <- read.csv('P1A_IV21081.csv', header = TRUE)
+PartA_DV <- read.csv('P1A_DV21081.csv', header = TRUE)
+PartA <- merge(PartA_IV, PartA_DV, by = 'ID')
+str(PartA)
+View(PartA)
+
+#Missing data
+any(is.na(PartA[,2]) == TRUE)# Check IV
+any(is.na(PartA[,3]) == TRUE)# Check DV
+PartA_incomplete <- PartA
+md.pattern(PartA_incomplete)# Inspect the missing data pattern
+aggr(PartA_incomplete, prop=FALSE, numbers=TRUE)
+marginplot(PartA_incomplete[,c('IV','DV')])
+# There are 438 complete data set
+# 45 missing IV, 142 missing DV, 10 both missing
+
+
+# Drop the 10 obsevations that both miss IV and DV
+PartA_imp <- PartA[!is.na(PartA$IV)==TRUE|!is.na(PartA$DV)==TRUE,]
+
+
+# Imputation of the Missing value with package mice
+
+#1. linear regression using bootstrap
+imp <- mice(PartA_imp, method = "norm.boot", printFlag = FALSE)
+print(imp)
+PartA_complete <- complete(imp)
+md.pattern(PartA_complete)
+stripplot(imp,pch=20,cex=0.5)
+xyplot(imp,DV~IV| .imp,pch=20,cex=0.5)
+
+
+#2. regression imputation（method = "norm.predict"）
+imp <- mice(PartA_imp, method = "norm.predict", printFlag = FALSE)
+print(imp)
+PartA_complete <- complete(imp)
+md.pattern(PartA_complete)
+stripplot(imp,pch=20,cex=0.5)
+xyplot(imp,DV~IV|.imp,pch=20,cex=0.5)
+
+#3. tochastic regression imputation（method = "norm.nob"）
+imp <- mice(PartA_imp, method = "norm.nob", printFlag = FALSE)
+PartA_complete <- complete(imp)
+md.pattern(PartA_complete)
+stripplot(imp,pch=20,cex=0.5)
+xyplot(imp,DV~IV| .imp,pch=20,cex=0.5)
+
+#4. cart
+imp <- mice(PartA_imp, method = "cart", printFlag = FALSE)
+PartA_complete <- complete(imp)
+md.pattern(PartA_complete)
+stripplot(imp,pch=20,cex=0.5)
+xyplot(imp,DV~IV| .imp,pch=20,cex=0.5)
+
+#————————————————————————————————————————#
+#Simple Regression
+Reg <- lm(DV ~ IV, data=PartA_complete)
+summary(Reg)
+kable(anova(Reg), caption='ANOVA Table')
+
+#perdict fitted value
+newDat <- list( IV = c(0.1, 5, 10, 12) )
+predict(Reg, newdata = newDat)
+
+#confidence interval
+obs <- nrow(PartA_complete)
+CI_L <- fitted(Reg) - qt(0.975, df=obs-2)*summary(Reg)$sigma*sqrt(1/obs + (PartA_complete$IV-mean(PartA_complete$IV))^2/(var(PartA_complete$IV)*(obs-1)))
+CI_U <- fitted(Reg) + qt(0.975, df=obs-2)*summary(Reg)$sigma*sqrt(1/obs + (PartA_complete$IV-mean(PartA_complete$IV))^2/(var(PartA_complete$IV)*(obs-1)))
+
+# Prediction Interval
+PI_L <- fitted(Reg) - qt(0.975, df=obs-2)*summary(Reg)$sigma*sqrt(1+1/obs + (PartA_complete$IV-mean(PartA_complete$IV))^2/(var(PartA_complete$IV)*(obs-1)))
+PI_U <- fitted(Reg) + qt(0.975, df=obs-2)*summary(Reg)$sigma*sqrt(1+1/obs + (PartA_complete$IV-mean(PartA_complete$IV))^2/(var(PartA_complete$IV)*(obs-1)))
+
+
+#——————————————————————————————————————METHOD ONE————————————————————————————————————————————————#
+# Use ggplot 
+ggplot(Reg, aes(x=IV,y=DV)) +
+geom_point(color="darkred",alpha=0.7) +
+geom_smooth(method=lm,color="blue",size=0.7,linetype="dashed", fill="#69b3a2", se=TRUE) +  #95% CI
+labs(title = "Scatter : DV ~ IV",size=30) +
+theme(plot.title = element_text(hjust = 0.5)) +
+annotate("text",x=3,y=70,label="Estimated Regression Line",size=5)
+geom_text(x=2, y=55,aes("Estimated Regression Line"),data=labels,parse=TRUE,hjust=0)
+
+temp_var <- predict (Reg, interval = "prediction")
+new_df <- cbind(PartA_complete, temp_var)
+
+ggplot(Reg, aes(x=IV,y=DV)) +
+  geom_point(color="darkred",alpha=0.7) +
+  geom_smooth(method=lm,color="blue",size=0.7,linetype="dashed", fill="#69b3a2", se=TRUE) +  #95% CI
+  geom_line(aes(y=new_df$lwr),color="green",linetype="dashed")+   #95% PI-lower
+  geom_line(aes(y=new_df$upr),color="green",linetype="dashed")+   #95% PI-upper
+  labs(title = "Scatter : DV ~ IV",size=30) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  annotate("text",x=3,y=70,label="Estimated Regression Line",size=5)
+geom_text(x=2, y=55,aes("Estimated Regression Line"),data=labels,parse=TRUE,hjust=0)
+
+
+#——————————————————————————————————————METHOD TWO————————————————————————————————————————————————#
+plot(PartA_complete$DV ~ PartA_complete$IV, main='Scatter : DV ~ IV', xlab='IV', ylab='DV', pch=20)
+abline(Reg, col='red', lty=3, lwd=2)
+legend('topleft', legend='Estimated Regression Line', lty=3, lwd=2, col='red')
+
+#95% CI
+summary(PartA_complete$IV)
+newx<- seq(-0.3076, 12.2005, by=0.05)
+conf_interval <- predict(Reg, newdata=data.frame(IV=newx), interval="confidence", level = 0.95)
+lines(newx, conf_interval[,2], col="blue", lty=2,lwd=1)
+lines(newx, conf_interval[,3], col="blue", lty=2,lwd=1)
+legend('topleft', legend=c('Estimated Regression Line','95% Confidence Interval'), lty=3:2, lwd=2:1,col=c('red','blue'))
+
+#95% PI
+pred_interval <- predict(Reg, newdata=data.frame(IV=newx), interval="prediction",level = 0.95)
+lines(newx, pred_interval[,2], col="green", lty=2,lwd=1)
+lines(newx, pred_interval[,3], col="green", lty=2,lwd=1)
+legend('topleft', legend=c('Estimated Regression Line','95% Confidence Interval','95% Prediction Interval'), lty=3:1:2, lwd=2:1:1,col=c('red','blue','green'))
+
+
+
+  
